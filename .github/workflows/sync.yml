@@ -26,7 +26,7 @@ jobs:
             echo "Merge succeeded without conflicts"
           else
             echo "Merge conflicts detected, resolving automatically..."
-            git checkout --theirs .github/workflows/ci.yml
+            git checkout --ours .github/workflows/ci.yml
             git add .github/workflows/ci.yml
             git checkout --ours .github/workflows/sync.yml
             git add .github/workflows/sync.yml
