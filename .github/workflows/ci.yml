@@ -1,14 +1,10 @@
 name: "CI"
 
 on:
-  workflow_dispatch:
-    inputs:
-      Release:
-        required: false
-        default: false
-        type: boolean
   push:
+    branches: ["main", "master"]
     tags: ["v*.*.*"]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -53,12 +49,10 @@ jobs:
       id-token: write
       contents: write
       attestations: write
-    if: github.event_name == 'push' || inputs.Release
     needs: [linux]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        if: startsWith(github.ref, 'refs/tags/')
         uses: actions/checkout@v6.0.2
 
       - name: Download Artifacts
@@ -67,9 +61,12 @@ jobs:
           path: archive
           pattern: artifact-*
 
-      - name: Compress
+      - name: Prepare release
+        id: prep
         run: |
           set -eux
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "short_sha=$SHORT_SHA" >> $GITHUB_OUTPUT
           mkdir -p dist
           tar -czf dist/stalwart-x86_64-unknown-linux-musl.tar.gz -C archive stalwart
 
@@ -90,7 +87,8 @@ jobs:
             awk '/^## \[/{c++} c==1' CHANGELOG.md > release_body.md
             echo "" >> release_body.md
           else
-            : > release_body.md
+            echo "## Commit ${{ github.sha }}" > release_body.md
+            echo "" >> release_body.md
           fi
           cat >> release_body.md <<EOF
           <hr />
@@ -104,33 +102,30 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.sigstore.json
-          prerelease: ${{!startsWith(github.ref, 'refs/tags/') || null}}
-          tag_name: ${{!startsWith(github.ref, 'refs/tags/') && 'nightly' || null}}
-          draft: ${{ startsWith(github.ref, 'refs/tags/') || null }}
+  
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('sha-{0}', steps.prep.outputs.short_sha) }}
+          name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('Build {0}', steps.prep.outputs.short_sha) }}
+          prerelease: false
+          draft: false
+          make_latest: true
           body_path: release_body.md
-
-  publish:
-    name: Publish release
-    needs: [linux, release]
-    if: startsWith(github.ref, 'refs/tags/')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Un-draft release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release edit "${{ github.ref_name }}" --draft=false --latest --repo "${{ github.repository }}"
 
   cleanup:
     name: Cleanup failed release
     needs: [linux, release]
-    if: failure() && startsWith(github.ref, 'refs/tags/')
+    if: failure()
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Delete draft release and tag
+      - name: Delete failed release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release delete "${{ github.ref_name }}" --yes --cleanup-tag --repo "${{ github.repository }}" || true
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          if [ "${{ startsWith(github.ref, 'refs/tags/') }}" = "true" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="sha-$SHORT_SHA"
+          fi
+          gh release delete "$TAG" --yes --cleanup-tag --repo "${{ github.repository }}" || true
