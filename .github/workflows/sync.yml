@@ -23,5 +23,9 @@ jobs:
           git remote add upstream https://github.com/sourcetf/stalwart.git
           git fetch upstream
           git checkout main
+          git checkout --theirs .github/workflows/ci.yml
+          git add .github/workflows/ci.yml
+          git checkout --ours .github/workflows/sync.yml
+          git add .github/workflows/sync.yml
           git merge upstream/main --no-edit
           git push origin main
